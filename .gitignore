@@ -1,0 +1,9 @@
+# matlab autosave files
+*.asv
+*.m~
+
+# folder metadata
+*.DS_Store
+
+# course-specific code
+courses/
