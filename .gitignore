@@ -4,6 +4,3 @@
 
 # folder metadata
 *.DS_Store
-
-# course-specific code
-courses/
