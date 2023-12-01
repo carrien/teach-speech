@@ -1,4 +1,4 @@
-function [y] = play_maskedTone(tone,toneAmp,masker,fs)
+function [y] = play_maskedTone(tone,toneAmp,masker,fs,maskerGain)
 %UNTITLED7 Summary of this function goes here
 %   Detailed explanation goes here
 
@@ -6,6 +6,7 @@ if nargin < 1, tone = []; end
 if nargin < 2, toneAmp = []; end
 if nargin < 3, masker = []; end
 if nargin < 4 || isempty(fs), fs = 11025; end   % sampling frequency
+if nargin < 5 || isempty(maskerGain), maskerGain = 1; end % gain
 
 if ~isempty(tone) && isnumeric(tone)
     tone = struct('freq',tone);
@@ -28,7 +29,7 @@ defaultMasker.dur = 1;
 masker = set_missingFields(masker,defaultMasker,0);
 
 yTone = get_sine(tone.freq,tone.amp,tone.phaseOffset,tone.dur,fs);
-yMasker = get_narrowbandNoise(masker.cf,masker.bw,masker.dur,fs);
+yMasker = get_narrowbandNoise(masker.cf,masker.bw,masker.dur,fs,maskerGain);
 yMasker = yMasker';
 toneLen = length(yTone);
 maskLen = length(yMasker);
