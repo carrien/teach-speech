@@ -102,6 +102,7 @@
         let targetZone = null;
         let timeInTarget = 0;
         let lastTimestamp = 0;
+        let targetMinY, targetMaxY;
 
         // DOM elements
         const curve = document.getElementById('curve');
@@ -160,7 +161,7 @@
             dot.style.left = `${screenX}px`;
             dot.style.top = `${screenY}px`;
             xValueElement.textContent = x.toFixed(2);
-            yValueElement.textContent = (HEIGHT - screenY).toFixed(2);
+            yValueElement.textContent = (curveFunction(x) / HEIGHT).toFixed(2); // Update this line
         }
 
         // Get current zone
@@ -170,12 +171,12 @@
             const midPoint = curveFunction(0) / HEIGHT;
             const upperPlateau = curveFunction(3) / HEIGHT;
             const lowerMid = (lowerPlateau + midPoint) / 2;
-            const upperMid = (upperPlateau + midPoint) / 2;
+            const upperMid = (midPoint + upperPlateau) / 2;
 
-            if (normalizedY < lowerMid) return 0;
-            if (normalizedY < midPoint) return 1;
-            if (normalizedY < upperMid) return 2;
-            if (normalizedY < upperPlateau) return 3;
+            if (normalizedY <= lowerPlateau) return 0;
+            if (normalizedY <= lowerMid) return 1;
+            if (normalizedY <= midPoint) return 2;
+            if (normalizedY <= upperMid) return 3;
             return 4;
         }
 
@@ -184,9 +185,25 @@
             const zones = [0, 1, 2, 3, 4].filter(zone => zone !== currentZone);
             targetZone = zones[Math.floor(Math.random() * zones.length)];
             updateBands();
+            updateTargetRegion();
         }
 
-        // New function to update all bands
+        // New function to update target region
+        function updateTargetRegion() {
+            const zoneHeight = HEIGHT / NUM_ZONES;
+            const bandHeight = zoneHeight * bandHeightSlider.value;
+            const zoneTops = [
+                HEIGHT - curveFunction(-3),
+                (HEIGHT - curveFunction(-3) + HEIGHT - curveFunction(0)) / 2,
+                HEIGHT - curveFunction(0),
+                (HEIGHT - curveFunction(0) + HEIGHT - curveFunction(3)) / 2,
+                HEIGHT - curveFunction(3)
+            ];
+            targetMinY = zoneTops[targetZone] - bandHeight / 2;
+            targetMaxY = zoneTops[targetZone] + bandHeight / 2;
+        }
+
+        // Update bands function
         function updateBands() {
             const zoneHeight = HEIGHT / NUM_ZONES;
             const bandHeight = zoneHeight * bandHeightSlider.value;
@@ -217,6 +234,7 @@
             // Update target zone
             targetZoneElement.style.top = `${zoneTops[targetZone]}px`;
             targetZoneElement.style.height = `${bandHeight}px`;
+            updateTargetRegion();
         }
 
         // Game loop
@@ -226,17 +244,16 @@
             lastTimestamp = timestamp;
 
             const x = parseFloat(slider.value);
-            const y = curveFunction(x);
+            const y = HEIGHT - curveFunction(x);
             updateDotPosition(x);
 
-            const currentZone = getCurrentZone(y);
-            if (currentZone === targetZone) {
+            if (y >= targetMinY && y <= targetMaxY) {
                 timeInTarget += deltaTime;
                 dot.style.backgroundColor = 'green';
                 if (timeInTarget >= 800) {
                     score++;
                     scoreElement.textContent = score;
-                    setNewTargetZone(currentZone);
+                    setNewTargetZone(targetZone);
                     timeInTarget = 0;
                 }
             } else {
@@ -268,8 +285,10 @@
             HEIGHT = window.innerHeight - document.getElementById('controls').offsetHeight;
             curve.setAttribute('viewBox', `0 0 ${WIDTH} ${HEIGHT}`);
             gameArea.style.height = `${HEIGHT}px`;
+            curve.innerHTML = ''; // Clear existing curve
             drawCurve();
             updateBands();
+            updateTargetRegion();
             updateDotPosition(parseFloat(slider.value));
         }
 
