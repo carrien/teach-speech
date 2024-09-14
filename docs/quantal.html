@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantal Theory Learning App</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-sizing: border-box;
+        }
+        #gameArea {
+            width: 100%;
+            flex-grow: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        #curve {
+            width: 100%;
+            height: 100%;
+        }
+        #dot {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #targetZone, .targetBand {
+            position: absolute;
+            width: 100%;
+            left: 0;
+        }
+        #targetZone {
+            background-color: rgba(0, 255, 0, 0.3);
+        }
+        .targetBand {
+            background-color: rgba(0, 255, 0, 0.1);
+            pointer-events: none;
+        }
+        #controls {
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        #slider {
+            width: 100%;
+        }
+        #info {
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameArea">
+        <svg id="curve"></svg>
+        <div id="dot"></div>
+        <div id="targetZone"></div>
+        <div class="targetBand" id="band0"></div>
+        <div class="targetBand" id="band1"></div>
+        <div class="targetBand" id="band2"></div>
+        <div class="targetBand" id="band3"></div>
+        <div class="targetBand" id="band4"></div>
+    </div>
+    <div id="controls">
+        <input type="range" id="slider" min="-3" max="3" step="0.01" value="-3">
+        <div id="info">
+            Score: <span id="score">0</span> | 
+            X: <span id="xValue">-3</span> | 
+            Y: <span id="yValue">0</span>
+        </div>
+        <div>
+            <input type="checkbox" id="showBands">
+            <label for="showBands">Show Bands</label>
+            <input type="range" id="bandHeightSlider" min="0.1" max="1" step="0.05" value="0.3">
+            <label for="bandHeightSlider">Band Height</label>
+        </div>
+    </div>
+
+    <script>
+        // Constants
+        let WIDTH, HEIGHT;
+        const K1 = 4;
+        const K2 = 4;
+        const B1 = -1.5;
+        const B2 = 1.5;
+        const NUM_ZONES = 5;
+
+        // Game state
+        let score = 0;
+        let targetZone = null;
+        let timeInTarget = 0;
+        let lastTimestamp = 0;
+
+        // DOM elements
+        const curve = document.getElementById('curve');
+        const dot = document.getElementById('dot');
+        const slider = document.getElementById('slider');
+        const targetZoneElement = document.getElementById('targetZone');
+        const scoreElement = document.getElementById('score');
+        const xValueElement = document.getElementById('xValue');
+        const yValueElement = document.getElementById('yValue');
+
+        // Add DOM elements for bands and checkbox
+        const bandElements = [
+            document.getElementById('band0'),
+            document.getElementById('band1'),
+            document.getElementById('band2'),
+            document.getElementById('band3'),
+            document.getElementById('band4')
+        ];
+        const showBandsCheckbox = document.getElementById('showBands');
+        const bandHeightSlider = document.getElementById('bandHeightSlider');
+
+        // Sigmoid function
+        function sigmoid(x) {
+            return 1 / (1 + Math.exp(-x));
+        }
+
+        // Combined sigmoid function for the curve
+        function curveFunction(x) {
+            return HEIGHT * (0.1 + 0.8 * (sigmoid(K1 * (x - B1)) + sigmoid(K2 * (x - B2))) / 2);
+        }
+
+        // Generate points for the SVG path
+        function generateCurvePoints() {
+            const points = [];
+            for (let x = -3; x <= 3; x += 0.1) {
+                const screenX = (x + 3) * (WIDTH / 6);
+                const screenY = HEIGHT - curveFunction(x);
+                points.push(`${screenX},${screenY}`);
+            }
+            return points.join(' ');
+        }
+
+        // Draw the curve
+        function drawCurve() {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', `M ${generateCurvePoints()}`);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', 'black');
+            curve.appendChild(path);
+        }
+
+        // Update dot position
+        function updateDotPosition(x) {
+            const screenX = (x + 3) * (WIDTH / 6);
+            const screenY = HEIGHT - curveFunction(x);
+            dot.style.left = `${screenX}px`;
+            dot.style.top = `${screenY}px`;
+            xValueElement.textContent = x.toFixed(2);
+            yValueElement.textContent = (HEIGHT - screenY).toFixed(2);
+        }
+
+        // Get current zone
+        function getCurrentZone(y) {
+            const normalizedY = y / HEIGHT;
+            const lowerPlateau = curveFunction(-3) / HEIGHT;
+            const midPoint = curveFunction(0) / HEIGHT;
+            const upperPlateau = curveFunction(3) / HEIGHT;
+            const lowerMid = (lowerPlateau + midPoint) / 2;
+            const upperMid = (upperPlateau + midPoint) / 2;
+
+            if (normalizedY < lowerMid) return 0;
+            if (normalizedY < midPoint) return 1;
+            if (normalizedY < upperMid) return 2;
+            if (normalizedY < upperPlateau) return 3;
+            return 4;
+        }
+
+        // Set new target zone
+        function setNewTargetZone(currentZone) {
+            const zones = [0, 1, 2, 3, 4].filter(zone => zone !== currentZone);
+            targetZone = zones[Math.floor(Math.random() * zones.length)];
+            updateBands();
+        }
+
+        // New function to update all bands
+        function updateBands() {
+            const zoneHeight = HEIGHT / NUM_ZONES;
+            const bandHeight = zoneHeight * bandHeightSlider.value;
+
+            // Calculate y-positions using the sigmoid function
+            const lowerPlateau = HEIGHT - curveFunction(-3);
+            const midPoint = HEIGHT - curveFunction(0);
+            const upperPlateau = HEIGHT - curveFunction(3);
+
+            // Interpolate for the steep regions
+            const lowerMid = (lowerPlateau + midPoint) / 2;
+            const upperMid = (upperPlateau + midPoint) / 2;
+
+            const zoneTops = [
+                lowerPlateau - bandHeight / 2,
+                lowerMid - bandHeight / 2,
+                midPoint - bandHeight / 2,
+                upperMid - bandHeight / 2,
+                upperPlateau - bandHeight / 2
+            ];
+
+            bandElements.forEach((band, index) => {
+                band.style.top = `${zoneTops[index]}px`;
+                band.style.height = `${bandHeight}px`;
+                band.style.display = showBandsCheckbox.checked ? 'block' : 'none';
+            });
+
+            // Update target zone
+            targetZoneElement.style.top = `${zoneTops[targetZone]}px`;
+            targetZoneElement.style.height = `${bandHeight}px`;
+        }
+
+        // Game loop
+        function gameLoop(timestamp) {
+            if (!lastTimestamp) lastTimestamp = timestamp;
+            const deltaTime = timestamp - lastTimestamp;
+            lastTimestamp = timestamp;
+
+            const x = parseFloat(slider.value);
+            const y = curveFunction(x);
+            updateDotPosition(x);
+
+            const currentZone = getCurrentZone(y);
+            if (currentZone === targetZone) {
+                timeInTarget += deltaTime;
+                dot.style.backgroundColor = 'green';
+                if (timeInTarget >= 800) {
+                    score++;
+                    scoreElement.textContent = score;
+                    setNewTargetZone(currentZone);
+                    timeInTarget = 0;
+                }
+            } else {
+                timeInTarget = 0;
+                dot.style.backgroundColor = 'red';
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize the game
+        function init() {
+            updateDimensions();
+            window.addEventListener('resize', updateDimensions);
+            drawCurve();
+            setNewTargetZone(-1);
+            slider.addEventListener('input', () => {
+                const x = parseFloat(slider.value);
+                updateDotPosition(x);
+            });
+            showBandsCheckbox.addEventListener('change', updateBands);
+            bandHeightSlider.addEventListener('input', updateBands);
+            requestAnimationFrame(gameLoop);
+        }
+
+        // New function to update dimensions
+        function updateDimensions() {
+            WIDTH = window.innerWidth;
+            HEIGHT = window.innerHeight - document.getElementById('controls').offsetHeight;
+            curve.setAttribute('viewBox', `0 0 ${WIDTH} ${HEIGHT}`);
+            gameArea.style.height = `${HEIGHT}px`;
+            drawCurve();
+            updateBands();
+            updateDotPosition(parseFloat(slider.value));
+        }
+
+        init();
+    </script>
+</body>
+</html>
