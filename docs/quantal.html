@@ -30,13 +30,18 @@
             width: 100%;
             height: 100%;
         }
+        #curve path {
+            stroke-width: 5px;
+            stroke: #333;
+        }
         #dot {
             position: absolute;
-            width: 10px;
-            height: 10px;
-            background-color: red;
+            width: 24px;
+            height: 24px;
+            background-color: #ff4136;
             border-radius: 50%;
             transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px rgba(255, 65, 54, 0.7);
         }
         #targetZone, .targetBand {
             position: absolute;
@@ -177,7 +182,8 @@
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', `M ${generateCurvePoints()}`);
             path.setAttribute('fill', 'none');
-            path.setAttribute('stroke', 'black');
+            path.setAttribute('stroke', '#333');
+            path.setAttribute('stroke-width', '3');
             curve.appendChild(path);
         }
 
@@ -281,7 +287,8 @@
 
             if (y >= targetMinY && y <= targetMaxY) {
                 timeInTarget += deltaTime;
-                dot.style.backgroundColor = 'green';
+                dot.style.backgroundColor = '#2ecc40';
+                dot.style.boxShadow = '0 0 10px rgba(46, 204, 64, 0.7)';
                 if (timeInTarget >= 800) {
                     score++;
                     scoreElement.textContent = score;
@@ -299,7 +306,8 @@
                 }
             } else {
                 timeInTarget = 0;
-                dot.style.backgroundColor = 'red';
+                dot.style.backgroundColor = '#ff4136';
+                dot.style.boxShadow = '0 0 10px rgba(255, 65, 54, 0.7)';
             }
 
             requestAnimationFrame(gameLoop);
