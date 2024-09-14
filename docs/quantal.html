@@ -54,9 +54,37 @@
             width: 100%;
             padding: 10px;
             box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         #info {
-            margin-top: 10px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        #shareResults {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        #shareResults:hover {
+            background-color: #45a049;
+        }
+        @media (max-width: 600px) {
+            #shareResults {
+                padding: 10px 20px;
+                font-size: 14px;
+            }
         }
     </style>
 </head>
@@ -83,6 +111,7 @@
             <input type="range" id="bandHeightSlider" min="0.1" max="1" step="0.05" value="0.3">
             <label for="bandHeightSlider">Band Height</label>
         </div>
+        <button id="shareResults">Share Results</button>
     </div>
 
     <script>
@@ -184,6 +213,12 @@
             targetZone = zones[Math.floor(Math.random() * zones.length)];
             updateBands();
             updateTargetRegion();
+
+            // Start a new turn without logging
+            currentTurn = {
+                targetZone: targetZone,
+                startTime: Date.now()
+            };
         }
 
         // Update target region
@@ -250,6 +285,15 @@
                 if (timeInTarget >= 800) {
                     score++;
                     scoreElement.textContent = score;
+                    
+                    // Log the completed turn
+                    if (currentTurn) {
+                        currentTurn.endTime = Date.now();
+                        currentTurn.duration = currentTurn.endTime - currentTurn.startTime;
+                        currentTurn.bandHeight = bandHeightSlider.value; // Log current band height
+                        playlog.turns.push(currentTurn);
+                    }
+                    
                     setNewTargetZone(targetZone);
                     timeInTarget = 0;
                 }
@@ -276,6 +320,14 @@
             drawCurve();
             setNewTargetZone(-1);
             
+            // Log screen details
+            const dpr = window.devicePixelRatio || 1;
+            playlog.screen = {
+                height: HEIGHT,
+                width: WIDTH,
+                scalingFactor: dpr
+            };
+
             // Add mouse and touch event listeners
             gameArea.addEventListener('mousemove', (e) => handleMove(e.clientX));
             gameArea.addEventListener('touchmove', (e) => {
@@ -286,6 +338,9 @@
             showBandsCheckbox.addEventListener('change', updateBands);
             bandHeightSlider.addEventListener('input', updateBands);
             requestAnimationFrame(gameLoop);
+
+            const shareButton = document.getElementById('shareResults');
+            shareButton.addEventListener('click', shareResults);
         }
 
         // Update dimensions
@@ -299,6 +354,55 @@
             updateBands();
             updateTargetRegion();
             updateDotPosition(currentX);
+        }
+
+        // Add these variables near the top of the script, with other variable declarations
+        const FORM_ID = '1FAIpQLScw3CzpKgRkknsfADY3em0QlOAsU1Bd1EkO4nKpsGHBN4vklQ';
+        const ENTRY_DATE = '1239297955';
+        const ENTRY_PLAYLOG = '305032898';
+
+        // Add this near the top of the script, with other variable declarations
+        let playlog = {
+            screen: {},
+            turns: []
+        };
+        let currentTurn = null;
+
+        // Add this function to pack the turns data
+        function packTurns() {
+            let packedTurns = playlog.turns.map(turn => [
+                turn.targetZone,
+                parseFloat(turn.bandHeight),
+                Math.round(turn.duration)
+            ]);
+            
+            let stringifiedTurns = JSON.stringify(packedTurns);
+            
+            // Remove turns from the end until the stringified version is less than 8000 characters
+            while (stringifiedTurns.length >= 8000 && packedTurns.length > 0) {
+                packedTurns.pop();
+                stringifiedTurns = JSON.stringify(packedTurns);
+            }
+            
+            return packedTurns;
+        }
+
+        // Modify the shareResults function
+        function shareResults() {
+            const date = getISODate();
+            const condensedPlaylog = {
+                screen: playlog.screen,
+                turns: packTurns()
+            };
+            const stringifiedPlaylog = encodeURIComponent(JSON.stringify(condensedPlaylog));
+            const baseUrl = `https://docs.google.com/forms/d/e/${FORM_ID}/viewform?usp=pp_url`;
+            const fullUrl = `${baseUrl}&entry.${ENTRY_DATE}=${date}&entry.${ENTRY_PLAYLOG}=${stringifiedPlaylog}`;
+            window.open(fullUrl, '_blank');
+        }
+
+        // Add these functions near the end of the script, just before the init() function
+        function getISODate() {
+            return new Date().toISOString().split('T')[0];
         }
 
         init();
