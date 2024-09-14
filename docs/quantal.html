@@ -165,7 +165,7 @@
         // Generate points for the SVG path
         function generateCurvePoints() {
             const points = [];
-            for (let x = -3; x <= 3; x += 0.1) {
+            for (let x = -3; x <= 3.01; x += 0.1) {
                 const screenX = (x + 3) * (WIDTH / 6);
                 const screenY = HEIGHT - curveFunction(x);
                 points.push(`${screenX},${screenY}`);
