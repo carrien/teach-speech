@@ -108,7 +108,7 @@
         <div id="info">
             Rounds completed: <span id="score">0</span>
         </div>
-        <div>
+        <div id="configArea">
             <input type="checkbox" id="showBands">
             <label for="showBands">Show Bands</label>
             <input type="range" id="bandHeightSlider" min="0.1" max="1" step="0.05" value="0.15">
@@ -118,6 +118,11 @@
     </div>
 
     <script>
+        // Configuration:
+        // - Add ?config=true to the URL to show the configuration options (checkbox and slider).
+        // - Add ?showBands=true or ?showBands=false to override the default visibility of the bands.
+        // - Add ?bandHeight=value (where value is between 0.1 and 1) to override the default band height.
+
         // Constants
         let WIDTH, HEIGHT;
         const K1 = 4;
@@ -140,6 +145,7 @@
         const dot = document.getElementById('dot');
         const targetZoneElement = document.getElementById('targetZone');
         const scoreElement = document.getElementById('score');
+        const configArea = document.getElementById('configArea');
 
         // Add DOM elements for bands and checkbox
         const bandElements = [
@@ -333,6 +339,27 @@
 
         // Initialize the game
         function init() {
+            // Check for URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const showConfig = urlParams.get('config') === 'true';
+            const showBandsParam = urlParams.get('showBands');
+            const bandHeightParam = urlParams.get('bandHeight');
+
+            if (!showConfig) {
+                configArea.style.display = 'none';
+            }
+
+            if (showBandsParam !== null) {
+                showBandsCheckbox.checked = showBandsParam === 'true';
+            }
+
+            if (bandHeightParam !== null) {
+                const bandHeightValue = parseFloat(bandHeightParam);
+                if (!isNaN(bandHeightValue) && bandHeightValue >= 0.1 && bandHeightValue <= 1) {
+                    bandHeightSlider.value = bandHeightValue;
+                }
+            }
+
             updateDimensions();
             window.addEventListener('resize', updateDimensions);
             drawCurve();
