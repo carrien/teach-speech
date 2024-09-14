@@ -309,8 +309,7 @@
 
         // New function to handle mouse/touch movement
         function handleMove(clientX) {
-            const rect = gameArea.getBoundingClientRect();
-            const x = (clientX - rect.left) / rect.width;
+            const x = clientX / window.innerWidth;
             currentX = x * 6 - 3;  // Map [0, 1] to [-3, 3]
             currentX = Math.max(-3, Math.min(3, currentX));  // Clamp between -3 and 3
         }
@@ -330,12 +329,12 @@
                 scalingFactor: dpr
             };
 
-            // Add mouse and touch event listeners
-            gameArea.addEventListener('mousemove', (e) => handleMove(e.clientX));
-            gameArea.addEventListener('touchmove', (e) => {
+            // Add mouse and touch event listeners to the document instead of gameArea
+            document.addEventListener('mousemove', (e) => handleMove(e.clientX));
+            document.addEventListener('touchmove', (e) => {
                 e.preventDefault();
                 handleMove(e.touches[0].clientX);
-            });
+            }, { passive: false });
 
             showBandsCheckbox.addEventListener('change', updateBands);
             bandHeightSlider.addEventListener('input', updateBands);
