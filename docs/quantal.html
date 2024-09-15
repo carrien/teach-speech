@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Quantal Theory Game</title>
     <style>
+        :root {
+            --light-green: #39ff14;
+            --dark-green: #2ecc40;
+            --red: #ff4136;
+            --yellow: #ffff00;
+        }
+
         body, html {
             margin: 0;
             padding: 0;
@@ -40,10 +47,21 @@
             position: absolute;
             width: 20px;
             height: 20px;
-            background-color: #ff4136;
+            background-color: var(--dark-green);
             border-radius: 50%;
             transform: translate(-50%, -50%);
-            box-shadow: 0 0 10px rgba(255, 65, 54, 0.7);
+            box-shadow: 0 0 10px rgba(46, 204, 64, 0.7);
+            overflow: hidden;
+        }
+        #dotWipe {
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            background-color: var(--light-green);
+            top: -50%;
+            left: -50%;
+            clip-path: circle(0% at 50% 50%);
+            transition: clip-path 0.05s linear;
         }
         #targetZone, .targetBand {
             position: absolute;
@@ -70,7 +88,7 @@
             text-align: center;
         }
         #shareResults {
-            background-color: #4CAF50;
+            background-color: var(--dark-green);
             border: none;
             color: white;
             padding: 15px 32px;
@@ -123,7 +141,7 @@
         }
 
         #startButton {
-            background-color: #4CAF50;
+            background-color: var(--dark-green);
             border: none;
             color: white;
             padding: 15px 32px;
@@ -169,7 +187,9 @@
 
     <div id="gameArea">
         <svg id="curve"></svg>
-        <div id="dot"></div>
+        <div id="dot">
+            <div id="dotWipe"></div>
+        </div>
         <div id="targetZone"></div>
         <div class="targetBand" id="band0"></div>
         <div class="targetBand" id="band1"></div>
@@ -365,9 +385,12 @@
             updateTargetRegion();
         }
 
+        const DWELL_TIME = 800; // ms
+        const WIPE_DURATION = DWELL_TIME * 4;
+
         // Game loop
         function gameLoop(timestamp) {
-            if (!gameStarted) return;  // Add this line
+            if (!gameStarted) return;
             if (!lastTimestamp) lastTimestamp = timestamp;
             const deltaTime = timestamp - lastTimestamp;
             lastTimestamp = timestamp;
@@ -379,9 +402,14 @@
 
             if (y >= targetMinY && y <= targetMaxY) {
                 timeInTarget += deltaTime;
-                dot.style.backgroundColor = '#2ecc40';
-                dot.style.boxShadow = '0 0 10px rgba(46, 204, 64, 0.7)';
-                if (timeInTarget >= 800) {
+                
+                // Update radial wipe effect
+                const wipePercentage = Math.min((timeInTarget / WIPE_DURATION) * 100, 100);
+                const dotWipe = document.getElementById('dotWipe');
+                dotWipe.style.clipPath = `circle(${wipePercentage}% at 50% 50%)`;
+                dotWipe.style.display = 'block';
+
+                if (timeInTarget >= DWELL_TIME) {
                     score++;
                     scoreElement.textContent = score;
                     
@@ -389,18 +417,28 @@
                     if (currentTurn) {
                         currentTurn.endTime = Date.now();
                         currentTurn.duration = currentTurn.endTime - currentTurn.startTime;
-                        currentTurn.bandHeight = bandHeightSlider.value; // Log current band height
+                        currentTurn.bandHeight = bandHeightSlider.value;
                         playlog.turns.push(currentTurn);
                     }
                     
                     setNewTargetZone(targetZone);
                     timeInTarget = 0;
+                    dotWipe.style.clipPath = 'circle(0% at 50% 50%)';
                 }
             } else {
                 timeInTarget = 0;
-                dot.style.backgroundColor = '#ff4136';
-                dot.style.boxShadow = '0 0 10px rgba(255, 65, 54, 0.7)';
+                const dotWipe = document.getElementById('dotWipe');
+                dotWipe.style.clipPath = 'circle(0% at 50% 50%)';
+                dotWipe.style.display = 'none';
             }
+
+            dot.style.backgroundColor = (y >= targetMinY && y <= targetMaxY) ? 
+                getComputedStyle(document.documentElement).getPropertyValue('--dark-green').trim() : 
+                getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
+            
+            dot.style.boxShadow = (y >= targetMinY && y <= targetMaxY) ?
+                '0 0 10px ' + getComputedStyle(document.documentElement).getPropertyValue('--dark-green').trim() :
+                '0 0 10px ' + getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
 
             requestAnimationFrame(gameLoop);
         }
