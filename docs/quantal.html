@@ -108,7 +108,7 @@
         <div id="info">
             Rounds completed: <span id="score">0</span>
         </div>
-        <div>
+        <div id="configArea">
             <input type="checkbox" id="showBands">
             <label for="showBands">Show Bands</label>
             <input type="range" id="bandHeightSlider" min="0.1" max="1" step="0.05" value="0.15">
@@ -118,6 +118,11 @@
     </div>
 
     <script>
+        // Configuration:
+        // - Add ?config=true to the URL to show the configuration options (checkbox and slider).
+        // - Add ?showBands=true or ?showBands=false to override the default visibility of the bands.
+        // - Add ?bandHeight=value (where value is between 0.1 and 1) to override the default band height.
+
         // Constants
         let WIDTH, HEIGHT;
         const K1 = 4;
@@ -140,6 +145,7 @@
         const dot = document.getElementById('dot');
         const targetZoneElement = document.getElementById('targetZone');
         const scoreElement = document.getElementById('score');
+        const configArea = document.getElementById('configArea');
 
         // Add DOM elements for bands and checkbox
         const bandElements = [
@@ -165,7 +171,7 @@
         // Generate points for the SVG path
         function generateCurvePoints() {
             const points = [];
-            for (let x = -3; x <= 3; x += 0.1) {
+            for (let x = -3; x <= 3.01; x += 0.1) {
                 const screenX = (x + 3) * (WIDTH / 6);
                 const screenY = HEIGHT - curveFunction(x);
                 points.push(`${screenX},${screenY}`);
@@ -209,8 +215,26 @@
 
         // Set new target zone
         function setNewTargetZone(currentZone) {
-            const zones = [0, 1, 2, 3, 4].filter(zone => zone !== currentZone);
-            targetZone = zones[Math.floor(Math.random() * zones.length)];
+            const shallowZones = [0, 2, 4];
+            const steepZones = [1, 3];
+            
+            // Filter out the current zone
+            const availableShallowZones = shallowZones.filter(zone => zone !== currentZone);
+            const availableSteepZones = steepZones.filter(zone => zone !== currentZone);
+            
+            // Randomly choose between steep and shallow with 50% probability
+            const chooseShallow = Math.random() < 0.5;
+            
+            if (chooseShallow && availableShallowZones.length > 0) {
+                targetZone = availableShallowZones[Math.floor(Math.random() * availableShallowZones.length)];
+            } else if (!chooseShallow && availableSteepZones.length > 0) {
+                targetZone = availableSteepZones[Math.floor(Math.random() * availableSteepZones.length)];
+            } else {
+                // If the chosen type has no available zones, pick from the other type
+                const availableZones = availableShallowZones.concat(availableSteepZones);
+                targetZone = availableZones[Math.floor(Math.random() * availableZones.length)];
+            }
+            
             updateBands();
             updateTargetRegion();
 
@@ -220,7 +244,6 @@
                 startTime: Date.now()
             };
         }
-
         // Update target region
         function updateTargetRegion() {
             const zoneHeight = HEIGHT / NUM_ZONES;
@@ -316,6 +339,27 @@
 
         // Initialize the game
         function init() {
+            // Check for URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const showConfig = urlParams.get('config') === 'true';
+            const showBandsParam = urlParams.get('showBands');
+            const bandHeightParam = urlParams.get('bandHeight');
+
+            if (!showConfig) {
+                configArea.style.display = 'none';
+            }
+
+            if (showBandsParam !== null) {
+                showBandsCheckbox.checked = showBandsParam === 'true';
+            }
+
+            if (bandHeightParam !== null) {
+                const bandHeightValue = parseFloat(bandHeightParam);
+                if (!isNaN(bandHeightValue) && bandHeightValue >= 0.1 && bandHeightValue <= 1) {
+                    bandHeightSlider.value = bandHeightValue;
+                }
+            }
+
             updateDimensions();
             window.addEventListener('resize', updateDimensions);
             drawCurve();
