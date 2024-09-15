@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quantal Theory Learning App</title>
+        <title>Quantal Theory Game</title>
     <style>
         body, html {
             margin: 0;
@@ -18,10 +18,12 @@
             flex-direction: column;
             align-items: center;
             box-sizing: border-box;
+            max-width: 1000px; /* Add this line */
+            margin: 0 auto; /* Add this line */
         }
         #gameArea {
-            width: 100%;
             flex-grow: 1;
+            width: 100%;
             position: relative;
             overflow: hidden;
             cursor: pointer;
@@ -91,9 +93,80 @@
                 font-size: 14px;
             }
         }
+
+        #landingScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: 20px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+
+        #landingScreen h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        #landingScreen p {
+            font-size: 16px;
+            margin-bottom: 15px;
+            max-width: 600px;
+        }
+
+        #startButton {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin-top: 20px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        #startButton:hover {
+            background-color: #45a049;
+        }
+
+        #controlStrip {
+            width: 100%;
+            height: 100px;
+            background-color: rgba(0, 123, 255, 0.2);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 18px;
+            color: #333;
+            pointer-events: none;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
+    <div id="landingScreen">
+        <h1>Welcome to the Quantal Theory Game!</h1>
+        <p>1. Move finger/cursor left/right to control the dot's horizontal position.</p>
+        <p>2. Keep your finger/cursor below the graph area for best control.</p>
+        <p>3. The dot moves up/down automatically along the curve.</p>
+        <p>4. Guide the dot into yellow targets quickly.</p>
+        <p>5. Play for about a minute (30-60 rounds).</p>
+        <p>6. Click "Share Results", then submit the Google Form that opens.</p>
+        <button id="startButton">Start Game</button>
+    </div>
+
     <div id="gameArea">
         <svg id="curve"></svg>
         <div id="dot"></div>
@@ -104,7 +177,9 @@
         <div class="targetBand" id="band3"></div>
         <div class="targetBand" id="band4"></div>
     </div>
+        <div id="controlStrip">Slide finger/cursor here</div>
     <div id="controls">
+        <button id="shareResults">Share Results</button>
         <div id="info">
             Rounds completed: <span id="score">0</span>
         </div>
@@ -114,7 +189,6 @@
             <input type="range" id="bandHeightSlider" min="0.1" max="1" step="0.05" value="0.15">
             <label for="bandHeightSlider">Band Height</label>
         </div>
-        <button id="shareResults">Share Results</button>
     </div>
 
     <script>
@@ -190,11 +264,10 @@
         }
 
         // Update dot position
-        function updateDotPosition(x) {
+        function updateDotPosition(x, y) {
             const screenX = (x + 3) * (WIDTH / 6);
-            const screenY = HEIGHT - curveFunction(x);
             dot.style.left = `${screenX}px`;
-            dot.style.top = `${screenY}px`;
+            dot.style.top = `${y}px`;
         }
 
         // Get current zone
@@ -238,7 +311,6 @@
             updateBands();
             updateTargetRegion();
 
-            // Start a new turn without logging
             currentTurn = {
                 targetZone: targetZone,
                 startTime: Date.now()
@@ -295,12 +367,15 @@
 
         // Game loop
         function gameLoop(timestamp) {
+            if (!gameStarted) return;  // Add this line
             if (!lastTimestamp) lastTimestamp = timestamp;
             const deltaTime = timestamp - lastTimestamp;
             lastTimestamp = timestamp;
 
             const y = HEIGHT - curveFunction(currentX);
-            updateDotPosition(currentX);
+            const controlStripHeight = 50;
+            const adjustedY = Math.min(y, HEIGHT - controlStripHeight);
+            updateDotPosition(currentX, adjustedY);
 
             if (y >= targetMinY && y <= targetMaxY) {
                 timeInTarget += deltaTime;
@@ -332,9 +407,18 @@
 
         // New function to handle mouse/touch movement
         function handleMove(clientX) {
-            const x = clientX / window.innerWidth;
-            currentX = x * 6 - 3;  // Map [0, 1] to [-3, 3]
-            currentX = Math.max(-3, Math.min(3, currentX));  // Clamp between -3 and 3
+            const gameAreaRect = gameArea.getBoundingClientRect();
+            const gameAreaLeft = gameAreaRect.left;
+            const gameAreaWidth = gameAreaRect.width;
+            
+            // Calculate x relative to the game area
+            let relativeX = clientX - gameAreaLeft;
+            
+            // Clamp relativeX to the game area
+            relativeX = Math.max(0, Math.min(gameAreaWidth, relativeX));
+            
+            // Map the relative x position to the [-3, 3] range
+            currentX = (relativeX / gameAreaWidth) * 6 - 3;
         }
 
         // Initialize the game
@@ -365,7 +449,6 @@
             drawCurve();
             setNewTargetZone(-1);
             
-            // Log screen details
             const dpr = window.devicePixelRatio || 1;
             playlog.screen = {
                 height: HEIGHT,
@@ -373,7 +456,7 @@
                 scalingFactor: dpr
             };
 
-            // Add mouse and touch event listeners to the document instead of gameArea
+            // Update mouse and touch event listeners
             document.addEventListener('mousemove', (e) => handleMove(e.clientX));
             document.addEventListener('touchmove', (e) => {
                 e.preventDefault();
@@ -382,18 +465,30 @@
 
             showBandsCheckbox.addEventListener('change', updateBands);
             bandHeightSlider.addEventListener('input', updateBands);
-            requestAnimationFrame(gameLoop);
 
             const shareButton = document.getElementById('shareResults');
             shareButton.addEventListener('click', shareResults);
+
+            const landingScreen = document.getElementById('landingScreen');
+            const startButton = document.getElementById('startButton');
+            startButton.addEventListener('click', startGame);
+
+            // Set up ResizeObserver
+            resizeObserver = new ResizeObserver(entries => {
+                for (let entry of entries) {
+                    if (entry.target === gameArea) {
+                        updateDimensions();
+                        break;
+                    }
+                }
+            });
+            resizeObserver.observe(gameArea);
         }
 
-        // Update dimensions
         function updateDimensions() {
-            WIDTH = window.innerWidth;
-            HEIGHT = window.innerHeight - document.getElementById('controls').offsetHeight;
-            curve.setAttribute('viewBox', `0 0 ${WIDTH} ${HEIGHT}`);
-            gameArea.style.height = `${HEIGHT}px`;
+            WIDTH = gameArea.offsetWidth;
+            HEIGHT = gameArea.offsetHeight;
+            const controlsHeight = document.getElementById('controls').offsetHeight;
             curve.innerHTML = ''; // Clear existing curve
             drawCurve();
             updateBands();
@@ -449,6 +544,32 @@
         function getISODate() {
             return new Date().toISOString().split('T')[0];
         }
+
+        // Add this variable near the top of the script, with other variable declarations
+        let gameStarted = false;
+
+        // Add this function to start the game
+        function startGame() {
+            const landingScreen = document.getElementById('landingScreen');
+            landingScreen.style.display = 'none';
+            gameStarted = true;  // Add this line
+            lastTimestamp = null;  // Reset lastTimestamp
+            setNewTargetZone(-1);  // Set a new target zone
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Add this near the top of the script, with other variable declarations
+        let resizeObserver;
+
+        // Add a cleanup function to disconnect the ResizeObserver when needed
+        function cleanup() {
+            if (resizeObserver) {
+                resizeObserver.disconnect();
+            }
+        }
+
+        // Call cleanup when appropriate, e.g., when the game ends or the page is about to unload
+        window.addEventListener('beforeunload', cleanup);
 
         init();
     </script>
