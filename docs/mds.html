@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MDS Explorer - Learn Multidimensional Scaling</title>
+    
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel Standalone for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Default distance matrix based on phonetic similarity
+        const DEFAULT_ANIMALS = ['Cat', 'Bat', 'Rat', 'Dog', 'Frog', 'Bird', 'Fish'];
+
+        // Distance matrix: lower values = more similar, 0 = identical
+        const DEFAULT_DISTANCE_MATRIX = [
+          [0, 2, 2, 8, 8, 9, 9],  // Cat
+          [2, 0, 1, 9, 8, 9, 9],  // Bat
+          [2, 1, 0, 9, 8, 9, 9],  // Rat
+          [8, 9, 9, 0, 3, 8, 8],  // Dog
+          [8, 8, 8, 3, 0, 8, 8],  // Frog
+          [9, 9, 9, 8, 8, 0, 6],  // Bird
+          [9, 9, 9, 8, 8, 6, 0],  // Fish
+        ];
+
+        const DEFAULT_ANIMAL_EMOJIS = {
+          'Cat': '🐱', 'Bat': '🦇', 'Rat': '🐭', 'Dog': '🐕',
+          'Frog': '🐸', 'Bird': '🐦', 'Fish': '🐟'
+        };
+
+        const ANIMAL_COLORS = {
+          'Cat': '#fca5a5', 'Bat': '#c084fc', 'Rat': '#fbbf24', 'Dog': '#5eead4',
+          'Frog': '#86efac', 'Bird': '#93c5fd', 'Fish': '#fda4af'
+        };
+
+        // Generate color for any animal based on hash
+        const getColorForAnimal = (animal) => {
+          if (ANIMAL_COLORS[animal]) return ANIMAL_COLORS[animal];
+          
+          // Generate color from string hash
+          let hash = 0;
+          for (let i = 0; i < animal.length; i++) {
+            hash = animal.charCodeAt(i) + ((hash << 5) - hash);
+          }
+          const hue = hash % 360;
+          return `hsl(${hue}, 70%, 75%)`;
+        };
+
+        function MDSExplorer() {
+          const [animals, setAnimals] = useState(DEFAULT_ANIMALS);
+          const [animalEmojis, setAnimalEmojis] = useState(DEFAULT_ANIMAL_EMOJIS);
+          const [distanceMatrix, setDistanceMatrix] = useState(DEFAULT_DISTANCE_MATRIX);
+          const [positions, setPositions] = useState({});
+          const [dragging, setDragging] = useState(null);
+          const [stress, setStress] = useState(100);
+          const [benchmarkDistances, setBenchmarkDistances] = useState(null);
+          const [optimalPositions, setOptimalPositions] = useState(null);
+          const canvasRef = useRef(null);
+
+          // Helper function to complete symmetric matrix from lower diagonal
+          const completeSymmetricMatrix = (partialMatrix) => {
+            const n = partialMatrix.length;
+            const fullMatrix = Array(n).fill(null).map(() => Array(n).fill(0));
+
+            for (let i = 0; i < n; i++) {
+              for (let j = 0; j <= i; j++) {
+                const value = partialMatrix[i][j];
+                fullMatrix[i][j] = value;
+                fullMatrix[j][i] = value; // Mirror to upper diagonal
+              }
+            }
+
+            return fullMatrix;
+          };
+
+          // Parse URL parameters on mount
+          useEffect(() => {
+            const params = new URLSearchParams(window.location.search);
+
+            // Parse animals parameter with optional emoji (format: Label:Emoji or just Label)
+            const animalsParam = params.get('animals');
+            if (animalsParam) {
+              const items = animalsParam.split(',').map(a => a.trim()).filter(a => a.length > 0);
+              if (items.length >= 3) {
+                const animalsList = [];
+                const emojiMap = {};
+                
+                items.forEach(item => {
+                  // Check if item contains emoji separator
+                  if (item.includes(':')) {
+                    const [label, emoji] = item.split(':').map(s => s.trim());
+                    animalsList.push(label);
+                    emojiMap[label] = emoji;
+                  } else {
+                    animalsList.push(item);
+                    // Use default emoji if available, otherwise use ❓
+                    emojiMap[item] = DEFAULT_ANIMAL_EMOJIS[item] || '❓';
+                  }
+                });
+                
+                setAnimals(animalsList);
+                setAnimalEmojis(emojiMap);
+              }
+            }
+            
+            // Parse matrix parameter (JSON array or semicolon-separated rows)
+            const matrixParam = params.get('matrix');
+            if (matrixParam) {
+              try {
+                // Try JSON format first: [[0],[2,0],[8,5,0]]
+                const matrix = JSON.parse(decodeURIComponent(matrixParam));
+                if (Array.isArray(matrix) && matrix.length >= 3) {
+                  // Check if it's a lower-diagonal-only format (each row i has i+1 elements)
+                  const isLowerDiagonal = matrix.every((row, i) => Array.isArray(row) && row.length === i + 1);
+
+                  if (isLowerDiagonal) {
+                    // Complete the symmetric matrix from lower diagonal
+                    setDistanceMatrix(completeSymmetricMatrix(matrix));
+                  } else if (matrix.every(row => Array.isArray(row) && row.length === matrix.length)) {
+                    // Full square matrix
+                    setDistanceMatrix(matrix);
+                  }
+                }
+              } catch (e) {
+                try {
+                  // Try semicolon-separated format: 0;2,0;8,5,0
+                  const rows = matrixParam.split(';');
+                  const matrix = rows.map(row =>
+                    row.split(',').map(val => parseFloat(val.trim())).filter(v => !isNaN(v))
+                  );
+
+                  if (matrix.length >= 3) {
+                    // Check if it's lower-diagonal-only format
+                    const isLowerDiagonal = matrix.every((row, i) => row.length === i + 1);
+
+                    if (isLowerDiagonal) {
+                      // Complete the symmetric matrix from lower diagonal
+                      setDistanceMatrix(completeSymmetricMatrix(matrix));
+                    } else if (matrix.every(row => row.length === matrix.length)) {
+                      // Full square matrix
+                      setDistanceMatrix(matrix);
+                    }
+                  }
+                } catch (e2) {
+                  console.error('Could not parse matrix parameter:', e2);
+                }
+              }
+            }
+          }, []);
+
+          // Initialize random positions
+          useEffect(() => {
+            initializePositions();
+          }, [animals]);
+
+          // Run auto-solve silently to compute benchmark distances
+          useEffect(() => {
+            if (animals.length === 0 || !distanceMatrix) return;
+
+            // Start from a circular layout
+            const startPositions = {};
+            animals.forEach((animal, i) => {
+              const angle = (i / animals.length) * Math.PI * 2;
+              const radius = 0.3;
+              startPositions[animal] = {
+                x: 0.5 + radius * Math.cos(angle),
+                y: 0.5 + radius * Math.sin(angle)
+              };
+            });
+
+            let currentPositions = { ...startPositions };
+
+            // Run optimization
+            for (let iter = 0; iter < 200; iter++) {
+              const gradients = {};
+
+              animals.forEach(animal => {
+                gradients[animal] = { x: 0, y: 0 };
+              });
+
+              animals.forEach((animal1, i) => {
+                animals.forEach((animal2, j) => {
+                  if (i === j) return;
+
+                  const pos1 = currentPositions[animal1];
+                  const pos2 = currentPositions[animal2];
+                  const currentDist = Math.sqrt(
+                    Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2)
+                  ) + 0.001;
+
+                  const maxDist = Math.max(...distanceMatrix.flat().filter(d => d > 0));
+                  const scale = maxDist > 0 ? 0.8 / maxDist : 0.1;
+                  const targetDist = distanceMatrix[i][j] * scale;
+                  const error = currentDist - targetDist;
+                  const force = error / currentDist;
+
+                  gradients[animal1].x += force * (pos1.x - pos2.x) * 0.1;
+                  gradients[animal1].y += force * (pos1.y - pos2.y) * 0.1;
+                });
+              });
+
+              animals.forEach(animal => {
+                currentPositions[animal].x = Math.max(0.1, Math.min(0.9,
+                  currentPositions[animal].x - gradients[animal].x
+                ));
+                currentPositions[animal].y = Math.max(0.1, Math.min(0.9,
+                  currentPositions[animal].y - gradients[animal].y
+                ));
+              });
+            }
+
+            // Calculate benchmark distances from optimal solution
+            const benchmarks = {};
+            animals.forEach(animal1 => {
+              animals.forEach(animal2 => {
+                if (animal1 !== animal2) {
+                  const pos1 = currentPositions[animal1];
+                  const pos2 = currentPositions[animal2];
+                  const dist = Math.sqrt(
+                    Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2)
+                  );
+                  const key = [animal1, animal2].sort().join('-');
+                  benchmarks[key] = dist;
+                }
+              });
+            });
+
+            setBenchmarkDistances(benchmarks);
+            setOptimalPositions(currentPositions);
+          }, [animals, distanceMatrix]);
+
+          const initializePositions = () => {
+            const newPositions = {};
+            animals.forEach((animal, i) => {
+              const angle = (i / animals.length) * Math.PI * 2;
+              const radius = 0.3;
+              newPositions[animal] = {
+                x: 0.5 + radius * Math.cos(angle),
+                y: 0.5 + radius * Math.sin(angle)
+              };
+            });
+            setPositions(newPositions);
+          };
+
+          // Calculate stress
+          useEffect(() => {
+            if (Object.keys(positions).length === 0) return;
+
+            // Ensure all animals have positions before calculating
+            const allPositionsReady = animals.every(animal => positions[animal] !== undefined);
+            if (!allPositionsReady) return;
+
+            const currentDistanceMatrix = calculateDistanceMatrix();
+            const calculatedStress = calculateStress(currentDistanceMatrix, distanceMatrix);
+            setStress(calculatedStress);
+          }, [positions, distanceMatrix, animals]);
+
+          const calculateDistanceMatrix = () => {
+            const matrix = [];
+            animals.forEach((animal1, i) => {
+              matrix[i] = [];
+              animals.forEach((animal2, j) => {
+                if (i === j) {
+                  matrix[i][j] = 0;
+                } else {
+                  const pos1 = positions[animal1];
+                  const pos2 = positions[animal2];
+                  // Guard against undefined positions during initialization
+                  if (!pos1 || !pos2) {
+                    matrix[i][j] = 0;
+                    return;
+                  }
+                  const dist = Math.sqrt(
+                    Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2)
+                  );
+                  matrix[i][j] = dist;
+                }
+              });
+            });
+            return matrix;
+          };
+
+          const calculateStress = (currentDistances, targetDistances) => {
+            let numerator = 0;
+            let denominator = 0;
+
+            for (let i = 0; i < animals.length; i++) {
+              for (let j = i + 1; j < animals.length; j++) {
+                const diff = currentDistances[i][j] - targetDistances[i][j] * 0.1;
+                numerator += diff * diff;
+                denominator += currentDistances[i][j] * currentDistances[i][j];
+              }
+            }
+
+            return denominator > 0 ? Math.sqrt(numerator / denominator) * 100 : 100;
+          };
+
+          const handleMouseDown = (animal, e) => {
+            e.preventDefault();
+            setDragging(animal);
+          };
+
+          const handleMouseMove = (e) => {
+            if (!dragging || !canvasRef.current) return;
+
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+
+            setPositions(prev => ({
+              ...prev,
+              [dragging]: { 
+                x: Math.max(0.1, Math.min(0.9, x)), 
+                y: Math.max(0.1, Math.min(0.9, y)) 
+              }
+            }));
+          };
+
+          const handleTouchMove = (e) => {
+            if (!dragging || !canvasRef.current) return;
+            e.preventDefault();
+
+            const touch = e.touches[0];
+            const rect = canvasRef.current.getBoundingClientRect();
+            const x = (touch.clientX - rect.left) / rect.width;
+            const y = (touch.clientY - rect.top) / rect.height;
+
+            setPositions(prev => ({
+              ...prev,
+              [dragging]: { 
+                x: Math.max(0.1, Math.min(0.9, x)), 
+                y: Math.max(0.1, Math.min(0.9, y)) 
+              }
+            }));
+          };
+
+          const handleMouseUp = () => setDragging(null);
+
+          const handleReset = () => initializePositions();
+
+          const handleCopyURL = () => {
+            const baseURL = window.location.origin + window.location.pathname;
+            // Format animals with emoji: Label:Emoji
+            const animalsParam = animals.map(animal => `${animal}:${animalEmojis[animal] || '❓'}`).join(',');
+
+            // Export only lower diagonal (including diagonal) to make URL shorter
+            const lowerDiagonalRows = distanceMatrix.map((row, i) => row.slice(0, i + 1).join(','));
+            const matrixParam = lowerDiagonalRows.join(';');
+
+            const url = `${baseURL}?animals=${encodeURIComponent(animalsParam)}&matrix=${encodeURIComponent(matrixParam)}`;
+
+            // Check if clipboard API is available (requires HTTPS or localhost)
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(url).then(() => {
+                alert('URL copied to clipboard! Share it to load this configuration.');
+              }).catch(err => {
+                console.error('Failed to copy URL:', err);
+                // Fallback: show the URL in a prompt
+                prompt('Copy this URL:', url);
+              });
+            } else {
+              // Fallback for browsers/contexts without clipboard API
+              prompt('Copy this URL:', url);
+            }
+          };
+
+          const handleAutoSolve = () => {
+            // Apply the pre-computed optimal positions
+            if (optimalPositions) {
+              setPositions({ ...optimalPositions });
+            }
+          };
+
+          // Get raw target distance from distance matrix (for display)
+          const getTargetDistance = (animal1, animal2) => {
+            const i = animals.indexOf(animal1);
+            const j = animals.indexOf(animal2);
+            if (i === -1 || j === -1) return 0;
+            return distanceMatrix[i][j];
+          };
+
+          // Auto-calculate scale factor based on max distance in matrix
+          // This makes the app scale-invariant: students can use any range of values
+          // Scale so max distance uses ~70% of available canvas diagonal (0.8 * sqrt(2) ≈ 1.13)
+          const maxDistance = Math.max(...distanceMatrix.flat().filter(d => d > 0));
+          const DISTANCE_SCALE = maxDistance > 0 ? 0.8 / maxDistance : 0.1;
+
+          // Calculate current distance between two animals
+          const getCurrentDistance = (animal1, animal2) => {
+            const pos1 = positions[animal1];
+            const pos2 = positions[animal2];
+            if (!pos1 || !pos2) return 0;
+            return Math.sqrt(Math.pow(pos1.x - pos2.x, 2) + Math.pow(pos1.y - pos2.y, 2));
+          };
+
+          // Calculate fit quality (inverse of stress for intuitive progress bar)
+          const fitQuality = Math.max(0, 100 - stress);
+
+          return (
+            <div className="h-screen bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-3 overflow-hidden">
+              <div className="h-full flex flex-col">
+                {/* Header */}
+                <div className="text-center mb-3">
+                  <h1 className="text-3xl font-bold text-white drop-shadow-lg">
+                    🎓 MDS Explorer
+                  </h1>
+                  <p className="text-sm text-white/90">
+                    Learn Multidimensional Scaling by exploring distance matrices
+                  </p>
+                </div>
+
+                {/* Main Grid Layout */}
+                <div className="flex-1 grid grid-cols-10 gap-3 min-h-0">
+                  {/* Left Sidebar - Enhanced Target Distances Matrix */}
+                  <div className="col-span-4 bg-white rounded-xl shadow-2xl p-4 overflow-auto">
+                    <div className="mb-4">
+                      <h3 className="font-bold text-gray-800 mb-2 text-base">🎯 Target Distances</h3>
+                      <p className="text-xs text-gray-600 mb-3">
+                        Drag animals on the canvas to match these target distances. Each cell shows how far apart two animals should be.
+                      </p>
+                      <div className="flex items-start gap-3 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-4 h-4 bg-green-100 border-2 border-green-400 rounded"></div>
+                          <span className="text-gray-700 font-medium">Good match</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-4 h-4 bg-yellow-50 border-2 border-yellow-300 rounded"></div>
+                          <span className="text-gray-700 font-medium">Needs adjustment</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-4 h-4 bg-red-100 border-2 border-red-400 rounded"></div>
+                          <span className="text-gray-700 font-medium">Poor match</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Matrix with headers */}
+                    <div className="overflow-x-auto">
+                      {/* Column headers */}
+                      <div className="flex items-end mb-1">
+                        <div className="w-24 flex-shrink-0"></div>
+                        {animals.map((animal, j) => (
+                          <div key={j} className="w-14 flex-shrink-0 flex flex-col items-center">
+                            <div className="text-2xl mb-0.5">{animalEmojis[animal] || '❓'}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Matrix rows */}
+                      <div className="space-y-1">
+                        {animals.map((animal1, i) => (
+                          <div key={animal1} className="flex items-center">
+                            {/* Row label */}
+                            <div className="w-24 flex-shrink-0 flex items-center gap-2 pr-2">
+                              <div className="text-2xl">{animalEmojis[animal1] || '❓'}</div>
+                              <div className="text-xs font-semibold text-gray-700">{animal1}</div>
+                            </div>
+                            
+                            {/* Matrix cells */}
+                            {animals.map((animal2, j) => {
+                              if (j > i) {
+                                return <div key={j} className="w-14 h-9 flex-shrink-0" />;
+                              }
+                              
+                              if (i === j) {
+                                return (
+                                  <div key={j} className="w-14 h-9 flex-shrink-0 flex items-center justify-center">
+                                    <div className="w-12 h-8 bg-gray-100 border-2 border-gray-300 rounded flex items-center justify-center text-gray-400 text-xs font-bold">
+                                      —
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              
+                              const targetDist = getTargetDistance(animal1, animal2);
+                              const currentDist = getCurrentDistance(animal1, animal2);
+
+                              // Compare against benchmark (auto-solve result) instead of target
+                              const benchmarkKey = [animal1, animal2].sort().join('-');
+                              const benchmarkDist = benchmarkDistances?.[benchmarkKey];
+
+                              let isGood, isBad, error;
+                              if (benchmarkDist) {
+                                // Error relative to achievable benchmark
+                                error = Math.abs(currentDist - benchmarkDist);
+                                const relativeError = benchmarkDist > 0 ? error / benchmarkDist : 0;
+                                isGood = relativeError < 0.15;  // Within 15% of benchmark
+                                isBad = relativeError > 0.30;   // Over 30% worse than benchmark
+                              } else {
+                                // Fallback to target-based if benchmark not ready
+                                const targetDistScaled = targetDist * DISTANCE_SCALE;
+                                error = Math.abs(currentDist - targetDistScaled);
+                                const relativeError = targetDistScaled > 0 ? error / targetDistScaled : 0;
+                                isGood = relativeError < 0.35;
+                                isBad = relativeError > 0.7;
+                              }
+
+                              return (
+                                <div key={j} className="w-14 h-9 flex-shrink-0 flex items-center justify-center">
+                                  <div
+                                    className={`w-12 h-8 flex items-center justify-center text-xs font-bold rounded border-2 transition-all ${
+                                      isGood ? 'bg-green-100 border-green-400 text-green-800' :
+                                      isBad ? 'bg-red-100 border-red-400 text-red-800' :
+                                      'bg-yellow-50 border-yellow-300 text-yellow-800'
+                                    }`}
+                                    title={`${animal2} ↔ ${animal1}\nTarget: ${targetDist}\nCurrent: ${currentDist.toFixed(2)}\nError: ${error.toFixed(3)}`}
+                                  >
+                                    {Number.isInteger(targetDist) ? targetDist : targetDist.toFixed(1)}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-gray-200">
+                      <p className="text-xs text-gray-600 leading-relaxed mb-3">
+                        <strong className="text-gray-800">💡 How it works:</strong> This matrix shows target distances between each pair of animals.
+                        Lower values mean items should be closer together—animals that sound alike (Cat, Bat, Rat) have small distances.
+                        The diagonal is always 0 (perfect self-similarity). Drag the animals on the canvas to match these distances and increase your fit quality!
+                      </p>
+                      
+                      <details className="text-xs text-gray-600">
+                        <summary className="font-semibold text-gray-800 cursor-pointer hover:text-indigo-600 mb-2">
+                          🔗 URL Parameters (click to expand)
+                        </summary>
+                        <div className="bg-gray-50 p-3 rounded-lg space-y-2 mt-2">
+                          <p className="font-medium text-gray-700">Pass custom data via URL:</p>
+                          
+                          <div className="space-y-1">
+                            <p className="font-mono text-xs text-indigo-600">?animals=Cat:🐱,Dog:🐕,Bird:🐦</p>
+                            <p className="text-gray-600">Format: <strong>Label:Emoji</strong> - Comma-separated items with custom emoji (minimum 3)</p>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <p className="font-mono text-xs text-indigo-600">?animals=Apple,Orange,Banana</p>
+                            <p className="text-gray-600">Without emoji - will use ❓ for items without predefined emoji</p>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <p className="font-mono text-xs text-indigo-600">?matrix=0;2,0;8,5,0</p>
+                            <p className="text-gray-600"><strong>Lower diagonal only</strong> - shortest format! Each row has i+1 values. The app mirrors to complete the matrix.</p>
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-mono text-xs text-indigo-600">?matrix=0,2,8;2,0,5;8,5,0</p>
+                            <p className="text-gray-600">Full symmetric matrix (also supported)</p>
+                          </div>
+
+                          <div className="space-y-1">
+                            <p className="font-mono text-xs text-indigo-600">?matrix=[[0],[2,0],[8,5,0]]</p>
+                            <p className="text-gray-600">Lower diagonal in JSON format (URL-encoded)</p>
+                          </div>
+
+                          <div className="mt-3 pt-2 border-t border-gray-300">
+                            <p className="font-medium text-gray-700 mb-1">Full example with custom emoji (lower diagonal):</p>
+                            <p className="font-mono text-xs text-indigo-600 break-all">
+                              ?animals=Apple:🍎,Orange:🍊,Banana:🍌&matrix=0;3,0;7,6,0
+                            </p>
+                          </div>
+                          
+                          <div className="mt-3 pt-2 border-t border-gray-300">
+                            <p className="font-medium text-gray-700 mb-1">📋 Tips:</p>
+                            <ul className="list-disc list-inside space-y-0.5 text-gray-600">
+                              <li>Use <strong>Label:Emoji</strong> for custom icons</li>
+                              <li>Or just <strong>Label</strong> for text only (gets ❓ or defaults)</li>
+                              <li>Click "🔗 Copy URL" button to share your configuration</li>
+                              <li><strong>Lower diagonal only</strong> format recommended (shorter URLs!)</li>
+                              <li>Matrix diagonal must have <strong>0s</strong> (perfect self-similarity)</li>
+                              <li>Lower values = more similar, higher values = more different</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </details>
+                      
+                      <details className="text-xs text-gray-600 mt-3">
+                        <summary className="font-semibold text-gray-800 cursor-pointer hover:text-indigo-600 mb-2">
+                          🎨 About the Icons
+                        </summary>
+                        <div className="bg-gray-50 p-3 rounded-lg mt-2 space-y-2">
+                          <p className="text-gray-600 leading-relaxed">
+                            Icons are <strong>Unicode emoji characters</strong> (🐱 🦇 🐭) that you fully control!
+                          </p>
+                          
+                          <div className="space-y-1">
+                            <p className="font-medium text-gray-700">Three ways to specify emoji:</p>
+                            <ol className="list-decimal list-inside space-y-0.5 text-gray-600 ml-2">
+                              <li><strong>Custom:</strong> Use <code className="bg-white px-1 rounded">Label:Emoji</code> format</li>
+                              <li><strong>Defaults:</strong> Use predefined names (Cat, Dog, Bird, etc.)</li>
+                              <li><strong>Generic:</strong> Any other label gets ❓</li>
+                            </ol>
+                          </div>
+                          
+                          <div className="pt-2 border-t border-gray-300">
+                            <p className="text-gray-600 leading-relaxed">
+                              <strong>Example URL with custom emoji:</strong>
+                            </p>
+                            <p className="font-mono text-xs text-indigo-600 bg-white p-1 rounded break-all mt-1">
+                              ?animals=Apple:🍎,Orange:🍊,Banana:🍌
+                            </p>
+                          </div>
+                          
+                          <div className="pt-2 border-t border-gray-300">
+                            <p className="font-medium text-gray-700 mb-1">Find emoji:</p>
+                            <ul className="list-disc list-inside space-y-0.5 text-gray-600 ml-2">
+                              <li>Windows: Win + . (period)</li>
+                              <li>Mac: Cmd + Ctrl + Space</li>
+                              <li>Mobile: Emoji keyboard</li>
+                              <li>Online: Emojipedia.org</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </details>
+                    </div>
+                  </div>
+
+                  {/* Center - Canvas */}
+                  <div className="col-span-6 flex flex-col min-h-0">
+                    {/* Fit Quality Indicator */}
+                    <div className="bg-gradient-to-br from-blue-900 to-blue-700 text-white p-4 rounded-xl shadow-2xl mb-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wider opacity-90">
+                            Fit Quality
+                          </h3>
+                          <div className="text-3xl font-bold">{fitQuality.toFixed(1)}%</div>
+                        </div>
+                        <div className="text-right">
+                          <h3 className="text-xs font-semibold uppercase tracking-wider opacity-90">
+                            Stress
+                          </h3>
+                          <div className="text-3xl font-bold">{stress.toFixed(1)}%</div>
+                        </div>
+                      </div>
+                      <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-red-400 via-yellow-400 to-green-400 rounded-full transition-all duration-300"
+                          style={{ width: `${fitQuality}%` }}
+                        />
+                      </div>
+                      <p className="text-xs opacity-80 mt-2">Higher fit quality is better! Drag animals to improve.</p>
+                    </div>
+
+                    {/* Canvas */}
+                    <div className="bg-white rounded-xl shadow-2xl p-4 flex-1 flex flex-col min-h-0">
+                      <div 
+                        ref={canvasRef}
+                        className="relative flex-1 bg-gradient-to-br from-slate-900 to-slate-700 rounded-lg overflow-hidden cursor-grab active:cursor-grabbing select-none"
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
+                        onMouseLeave={handleMouseUp}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleMouseUp}
+                      >
+                        {/* Grid */}
+                        <div className="absolute inset-0 opacity-10">
+                          {[25, 50, 75].map(pos => (
+                            <React.Fragment key={pos}>
+                              <div className="absolute left-0 right-0 h-px bg-white" style={{ top: `${pos}%` }} />
+                              <div className="absolute top-0 bottom-0 w-px bg-white" style={{ left: `${pos}%` }} />
+                            </React.Fragment>
+                          ))}
+                        </div>
+
+                        {/* Strain Lines (when dragging) */}
+                        {dragging && (
+                          <svg className="absolute inset-0 pointer-events-none" style={{ width: '100%', height: '100%' }}>
+                            {animals.filter(a => a !== dragging).map(animal => {
+                              const pos1 = positions[dragging];
+                              const pos2 = positions[animal];
+                              if (!pos1 || !pos2 || !canvasRef.current) return null;
+                              
+                              const rect = canvasRef.current.getBoundingClientRect();
+                              const x1 = pos1.x * rect.width;
+                              const y1 = pos1.y * rect.height;
+                              const x2 = pos2.x * rect.width;
+                              const y2 = pos2.y * rect.height;
+                              
+                              const currentDist = getCurrentDistance(dragging, animal);
+
+                              // Compare against benchmark (auto-solve result)
+                              const benchmarkKey = [dragging, animal].sort().join('-');
+                              const benchmarkDist = benchmarkDistances?.[benchmarkKey];
+
+                              let isGood, isBad;
+                              if (benchmarkDist) {
+                                const error = Math.abs(currentDist - benchmarkDist);
+                                const relativeError = benchmarkDist > 0 ? error / benchmarkDist : 0;
+                                isGood = relativeError < 0.15;  // Within 15% of benchmark
+                                isBad = relativeError > 0.30;   // Over 30% worse than benchmark
+                              } else {
+                                // Fallback to target-based
+                                const targetDist = getTargetDistance(dragging, animal);
+                                const targetDistScaled = targetDist * DISTANCE_SCALE;
+                                const error = Math.abs(currentDist - targetDistScaled);
+                                const relativeError = targetDistScaled > 0 ? error / targetDistScaled : 0;
+                                isGood = relativeError < 0.35;
+                                isBad = relativeError > 0.7;
+                              }
+
+                              // Color based on error: green=good, yellow=ok, red=bad
+                              const color = isGood ? '#4ade80' : isBad ? '#f87171' : '#fbbf24';
+                              const opacity = isGood ? 0.3 : isBad ? 0.7 : 0.5;
+                              const strokeWidth = isGood ? 1 : isBad ? 3 : 2;
+
+                              // Dashed if too far, solid if too close
+                              const targetForDash = benchmarkDist || (getTargetDistance(dragging, animal) * DISTANCE_SCALE);
+                              const dashArray = currentDist > targetForDash ? "5,5" : "none";
+
+                              return (
+                                <line
+                                  key={animal}
+                                  x1={x1}
+                                  y1={y1}
+                                  x2={x2}
+                                  y2={y2}
+                                  stroke={color}
+                                  strokeWidth={strokeWidth}
+                                  opacity={opacity}
+                                  strokeDasharray={dashArray}
+                                />
+                              );
+                            })}
+                          </svg>
+                        )}
+
+                        {/* Animals */}
+                        {animals.map(animal => {
+                          const pos = positions[animal] || { x: 0.5, y: 0.5 };
+                          const isDraggingThis = dragging === animal;
+                          return (
+                            <div
+                              key={animal}
+                              className={`absolute w-12 h-12 rounded-full flex items-center justify-center text-2xl cursor-grab active:cursor-grabbing transition-transform hover:scale-110 active:scale-95 border-3 border-white shadow-lg ${
+                                isDraggingThis ? 'scale-125 z-50' : ''
+                              }`}
+                              style={{
+                                left: `${pos.x * 100}%`,
+                                top: `${pos.y * 100}%`,
+                                transform: 'translate(-50%, -50%)',
+                                background: getColorForAnimal(animal),
+                              }}
+                              onMouseDown={(e) => handleMouseDown(animal, e)}
+                              onTouchStart={(e) => {
+                                e.preventDefault();
+                                setDragging(animal);
+                              }}
+                            >
+                              {animalEmojis[animal] || '❓'}
+                              <div className="absolute top-full mt-1 bg-black/70 text-white px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap pointer-events-none">
+                                {animal}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Controls */}
+                      <div className="flex gap-2 mt-3">
+                        <button 
+                          onClick={handleReset}
+                          className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-lg transition-all hover:shadow-md active:scale-95 text-sm"
+                        >
+                          🔄 Reset
+                        </button>
+                        <button 
+                          onClick={handleAutoSolve}
+                          className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold py-2 px-4 rounded-lg transition-all hover:shadow-lg active:scale-95 text-sm"
+                        >
+                          ✨ Auto-Solve
+                        </button>
+                        <button 
+                          onClick={handleCopyURL}
+                          className="flex-1 bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white font-semibold py-2 px-4 rounded-lg transition-all hover:shadow-lg active:scale-95 text-sm"
+                          title="Copy shareable URL with current configuration"
+                        >
+                          🔗 Copy URL
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        ReactDOM.render(<MDSExplorer />, document.getElementById('root'));
+    </script>
+</body>
+</html>
